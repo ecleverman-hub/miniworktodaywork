@@ -1,0 +1,23 @@
+{
+  "name": "学习打卡清单",
+  "short_name": "学习打卡",
+  "description": "像打卡App一样的学习清单：按周按天勾选完成、连续打卡、动效反馈、导出Excel。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f2f7",
+  "theme_color": "#007aff",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
