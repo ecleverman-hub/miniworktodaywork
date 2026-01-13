@@ -28,6 +28,9 @@
         .sidebar {
             width: 280px; background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(30px);
             border-right: 1px solid rgba(255, 255, 255, 0.4); display: flex; flex-direction: column; padding: 30px 20px;
+            height: 100vh;        /* 占满屏幕高度 */
+            overflow-y: auto;     /* 左侧允许竖向滚动 */
+            overflow-x: hidden;   /* 禁止横向滚动 */
         }
         .logo { font-size: 28px; font-weight: 900; letter-spacing: -1px; margin-bottom: 40px; padding-left: 15px; }
         .logo span { color: var(--primary); }
@@ -292,6 +295,7 @@
             <div class="nav-item" onclick="switchView('resource', this)">🔗 资源导航</div>
             <div class="nav-item" onclick="switchView('stats', this)">📈 成长热力</div>
             <div class="nav-item" onclick="switchView('medals', this)">🏅 奖章墙</div>
+            <div class="nav-item" onclick="switchView('backup', this)">💾 数据安全</div>
         </div>
         <div class="widget-area" style="margin-top: auto; display: flex; flex-direction: column; gap: 15px;">
             <div class="water-card">
@@ -403,10 +407,50 @@
             <p id="medalEmpty" style="text-align:center; color:#A0AEC0; padding:40px; display:none;">还没有奖章，先去完成一个小目标吧 ✨</p>
         </section>
 
+
+        <section id="view-backup" class="view-section">
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:20px;">
+                <div>
+                    <h1 style="margin:0;">数据安全</h1>
+                    <div style="font-size:12px; color:var(--text-sub); margin-top:8px;">
+                        这里提供导出/导入与本地自动备份（仅保存在你的浏览器里）。建议定期导出到本机。
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn-ghost" onclick="exportData()">📤 导出 JSON</button>
+                    <button class="btn-primary" onclick="triggerImport()">📥 导入 JSON</button>
+                </div>
+            </div>
+
+            <div class="glass-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <div>
+                        <div style="font-weight:900;">🛟 本地自动备份</div>
+                        <div style="font-size:12px; color:var(--text-sub); margin-top:6px;">
+                            系统会在写入数据时自动轮换保存最近 3 份快照（默认每 6 小时最多生成 1 份），用于应急恢复。
+                        </div>
+                    </div>
+                    <button class="btn-ghost" onclick="rotateBackupNow()" title="立刻生成一份备份快照（会轮换覆盖最旧的）">立即备份</button>
+                </div>
+
+                <div id="backupList" style="margin-top:16px; display:grid; grid-template-columns: 1fr; gap:12px;"></div>
+                <div style="margin-top:14px; font-size:12px; color:rgba(45,50,80,0.55);">
+                    提示：恢复会覆盖当前数据，恢复前建议先导出一份 JSON 备份。
+                </div>
+            </div>
+
+            <input id="importFileInput" type="file" accept="application/json" style="display:none" onchange="handleImportFile(event)">
+        </section>
+
     </main>
 
 <script>
     const getToday = () => new Date().toISOString().split('T')[0];
+    // 稳定性：更可靠的唯一 ID（避免 Date.now() 极端碰撞）
+    function uid(prefix='id') {
+        return prefix + '_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+    }
+
     let viewingDate = getToday();
     let currentResCat = '全部';
 
@@ -422,16 +466,128 @@
         cycleSkips: JSON.parse(localStorage.getItem('gp17_cycleSkips')) || {}
     };
 
-    function save() {
-        Object.keys(state).forEach(key => {
-            const storageKey = 'gp17_' + (key === 'studyProjects' ? 'study_p' : key === 'resources' ? 'res' : key);
-            localStorage.setItem(storageKey, JSON.stringify(state[key]));
-        });
-        renderHeatMap();
+    // 稳定性：修复/兼容旧数据结构，避免升级后因类型不符导致报错
+    function normalizeState() {
+        try {
+            if(!state || typeof state !== 'object') state = {};
+            if(!state.todos || typeof state.todos !== 'object' || Array.isArray(state.todos)) state.todos = {};
+            if(!Array.isArray(state.configs)) state.configs = [];
+            if(!Array.isArray(state.retros)) state.retros = [];
+            if(!Array.isArray(state.resources)) state.resources = [];
+            if(!state.water || typeof state.water !== 'object' || Array.isArray(state.water)) state.water = {};
+            if(!Array.isArray(state.studyProjects)) state.studyProjects = [];
+            if(!Array.isArray(state.medals)) state.medals = [];
+            if(!Array.isArray(state.medalWall)) state.medalWall = [];
+            if(!state.cycleSkips || typeof state.cycleSkips !== 'object' || Array.isArray(state.cycleSkips)) state.cycleSkips = {};
+        } catch(e) { /* ignore */ }
+    }
+    normalizeState();
+
+
+    function pruneCycleSkips(keepDays = 90) {
+        try {
+            if(!state.cycleSkips) return;
+            const today = new Date();
+            const cutoff = new Date(today);
+            cutoff.setDate(cutoff.getDate() - keepDays);
+            const cutoffStr = cutoff.toISOString().split('T')[0];
+
+            Object.keys(state.cycleSkips).forEach(dateKey => {
+                // 仅处理合法日期键（YYYY-MM-DD）
+                if(!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
+
+                if(dateKey < cutoffStr) {
+                    delete state.cycleSkips[dateKey];
+                    return;
+                }
+
+                // 清理空/重复
+                const arr = Array.isArray(state.cycleSkips[dateKey]) ? state.cycleSkips[dateKey] : [];
+                const uniq = [...new Set(arr.filter(Boolean))];
+                if(uniq.length) state.cycleSkips[dateKey] = uniq;
+                else delete state.cycleSkips[dateKey];
+            });
+        } catch(e) { /* ignore */ }
     }
 
+    
+    // 数据安全：自动轮换本地备份（最多 3 份），并对频繁保存做轻量去抖
+    const BACKUP_KEYS = ['gp17_backup_1','gp17_backup_2','gp17_backup_3'];
+    const BACKUP_META = ['gp17_backup_meta_1','gp17_backup_meta_2','gp17_backup_meta_3'];
+    const BACKUP_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 小时最多生成 1 份自动备份
+    let _saveTimer = null;
+    let _savePending = false;
 
-    // --- 奖章/庆祝（补齐：之前写了但未触发/未定义 showMedal）---
+    function snapshotStateString() {
+        // 只保存 state 本体（不含函数），体积可控；JSON.stringify 失败则返回空串
+        try { return JSON.stringify(state); } catch(e) { return ''; }
+    }
+
+    function rotateBackups(force=false) {
+        try {
+            const now = Date.now();
+            const last = parseInt(localStorage.getItem('gp17_backup_ts') || '0', 10);
+            if(!force && last && (now - last) < BACKUP_MIN_INTERVAL_MS) return;
+
+            const snap = snapshotStateString();
+            if(!snap) return;
+
+            // shift 3 <- 2 <- 1
+            for(let i=2;i>=1;i--){
+                const prev = localStorage.getItem(BACKUP_KEYS[i-1]);
+                const prevMeta = localStorage.getItem(BACKUP_META[i-1]);
+                if(prev) localStorage.setItem(BACKUP_KEYS[i], prev); else localStorage.removeItem(BACKUP_KEYS[i]);
+                if(prevMeta) localStorage.setItem(BACKUP_META[i], prevMeta); else localStorage.removeItem(BACKUP_META[i]);
+            }
+            localStorage.setItem(BACKUP_KEYS[0], snap);
+            localStorage.setItem(BACKUP_META[0], JSON.stringify({ ts: now, date: new Date(now).toISOString() }));
+
+            localStorage.setItem('gp17_backup_ts', String(now));
+        } catch(e) { /* ignore */ }
+    }
+
+    function doSaveNow() {
+        try {
+            // 轻量清理：避免 cycleSkips 长期累计变大（默认保留最近 90 天）
+            pruneCycleSkips(90);
+
+            // 自动备份（节流）
+            rotateBackups(false);
+
+            Object.keys(state).forEach(key => {
+                const storageKey = 'gp17_' + (key === 'studyProjects' ? 'study_p' : key === 'resources' ? 'res' : key);
+                localStorage.setItem(storageKey, JSON.stringify(state[key]));
+            });
+
+            // 性能：热力图更新用 RAF 合并到下一帧，避免短时间多次重绘
+            requestAnimationFrame(() => {
+                try { renderHeatMap(); } catch(e) {}
+            });
+
+            // 数据安全面板同步
+            try { renderBackupList(); } catch(e) {}
+        } catch(e) { /* ignore */ }
+    }
+
+    function save() {
+        _savePending = true;
+        if(_saveTimer) clearTimeout(_saveTimer);
+        _saveTimer = setTimeout(() => {
+            _saveTimer = null;
+            if(!_savePending) return;
+            _savePending = false;
+            doSaveNow();
+        }, 160); // 去抖：合并短时间内的多次保存
+    }
+
+    // 页面关闭前尽量落盘，降低“最后一次编辑未保存”的概率
+    window.addEventListener('beforeunload', () => {
+        try{
+            if(_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+            if(_savePending) { _savePending = false; doSaveNow(); }
+        }catch(e){}
+    });
+// --- 奖章/庆祝（补齐：之前写了但未触发/未定义 showMedal）---
     function showMedal(title, desc) {
         const overlay = document.getElementById('medalOverlay');
         const t = document.getElementById('medalTitle');
@@ -505,6 +661,7 @@
         if(confirm('确定清空奖章墙？这不会影响你的任务/复盘/学习数据。')) {
             state.medalWall = [];
             save(); renderMedalWall();
+        renderBackupList();
         }
     }
 
@@ -589,7 +746,7 @@
         window.tempLegacy.forEach(t => {
             // 避免重复同步
             if(!state.todos[getToday()].some(exist => exist.text === t.text)) {
-                state.todos[getToday()].push({ id: Date.now() + Math.random(), text: t.text, done: false, subtasks: t.subtasks || [] });
+                state.todos[getToday()].push({ id: uid('todo'), text: t.text, done: false, subtasks: t.subtasks || [] });
             }
             // 从原日期删除以防止再次检测
             state.todos[t.originDate] = state.todos[t.originDate].filter(orig => orig.id !== t.id);
@@ -613,9 +770,9 @@
 
         if(type === 'none') {
             if(!state.todos[viewingDate]) state.todos[viewingDate] = [];
-            state.todos[viewingDate].push({ id: Date.now(), text, done: false, subtasks: [] });
+            state.todos[viewingDate].push({ id: uid('todo'), text, done: false, subtasks: [] });
         } else {
-            state.configs.push({ id: Date.now(), text, type, start: viewingDate, end: end });
+            state.configs.push({ id: uid('conf'), text, type, start: viewingDate, end: end });
             // 立刻在当前查看日期生效（修复循环不生效的问题）
             ensureCycledTasks(viewingDate);
             processCycles();
@@ -632,12 +789,12 @@
         list.innerHTML = tasks.map((t) => `
             <div class="glass-card" style="padding:20px; ${t.done ? 'opacity:0.6;' : ''}">
                 <div style="display:flex; align-items:center; gap:15px;">
-                    <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTodo(${t.id})" style="width:20px; height:20px; accent-color:var(--primary);">
+                    <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTodo(\'${t.id}\')" style="width:20px; height:20px; accent-color:var(--primary);">
                     <div style="flex:1; font-weight:700; font-size:16px; ${t.done ? 'text-decoration:line-through;' : ''}">${t.text}</div>
-                    <button class="btn-ghost" onclick="addSubtask(${t.id})">+ 拆解</button>
-                    <div style="color:var(--danger); cursor:pointer; font-size:18px;" onclick="deleteTodo(${t.id})">×</div>
+                    <button class="btn-ghost" onclick="addSubtask(\'${t.id}\')">+ 拆解</button>
+                    <div style="color:var(--danger); cursor:pointer; font-size:18px;" onclick="deleteTodo(\'${t.id}\')">×</div>
                 </div>
-                ${t.subtasks && t.subtasks.length > 0 ? `<div class="subtask-container">${t.subtasks.map(s => `<div class="subtask-item"><div class="subtask-actions" style="flex:1;"><input type="checkbox" ${s.done ? 'checked' : ''} onchange="toggleSubtask(${t.id}, ${s.id})" style="width:18px; height:18px; accent-color:var(--primary);"><span style="flex:1; font-size:14px; ${s.done ? 'text-decoration:line-through; color:#A0AEC0;' : ''}" title="${s.text}">${s.text}</span></div><span class="icon-del" title="删除子任务" onclick="deleteSubtask(${t.id}, ${s.id})">×</span></div>`).join('')}</div>` : ''}
+                ${t.subtasks && t.subtasks.length > 0 ? `<div class="subtask-container">${t.subtasks.map(s => `<div class="subtask-item"><div class="subtask-actions" style="flex:1;"><input type="checkbox" ${s.done ? 'checked' : ''} onchange="toggleSubtask(\'${t.id}\', \'${s.id}\')" style="width:18px; height:18px; accent-color:var(--primary);"><span style="flex:1; font-size:14px; ${s.done ? 'text-decoration:line-through; color:#A0AEC0;' : ''}" title="${s.text}">${s.text}</span></div><span class="icon-del" title="删除子任务" onclick="deleteSubtask(\'${t.id}\', \'${s.id}\')">×</span></div>`).join('')}</div>` : ''}
             </div>`).join('') || '<p style="text-align:center; color:#A0AEC0; padding:40px;">今日无安排</p>';
     }
 
@@ -652,7 +809,7 @@
         if(txt) {
             const t = state.todos[viewingDate].find(x => x.id == todoId);
             if(!t.subtasks) t.subtasks = [];
-            t.subtasks.push({id: Date.now(), text: txt, done: false});
+            t.subtasks.push({id: uid('sub'), text: txt, done: false});
             save(); renderTodos();
         }
     }
@@ -902,10 +1059,24 @@
     function deleteStudy(id) { if(confirm('确定放弃？')) { state.studyProjects = state.studyProjects.filter(p=>p.id!==id); save(); renderStudyView(); } }
 
     // --- 基础辅助 ---
-    function switchView(id, el) {
+    
+    function renderAll(){
+        try{ renderCalendar(); }catch(e){}
+        try{ renderTodos(); }catch(e){}
+        try{ renderRetros(); }catch(e){}
+        try{ renderResources(); }catch(e){}
+        try{ renderStudyView(); }catch(e){}
+        try{ renderHeatMap(); }catch(e){}
+        try{ renderMedalWall();
+        renderBackupList(); }catch(e){}
+        try{ renderBackupList(); }catch(e){}
+            }
+
+function switchView(id, el) {
         document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
         document.getElementById('view-' + id).classList.add('active');
         if(id === 'medals') renderMedalWall();
+        renderBackupList();
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         el.classList.add('active');
     }
@@ -943,7 +1114,7 @@
                     // 用 confId 防重，避免同一天重复塞入
                     if(!state.todos[target].some(t => t.confId === conf.id)) {
                         state.todos[target].push({
-                            id: Date.now() + Math.random(),
+                            id: uid('todo'),
                             confId: conf.id,
                             text: conf.text,
                             done: false,
@@ -1082,12 +1253,206 @@ ${retros.slice(0,4).map(r => '- ' + r.title).join('\n') || '- （本周暂无复
     }
 
 
-    function exportData() {
+    
+    // --- 数据安全：导入/导出 JSON & 备份恢复（新增，不影响既有功能） ---
+    function triggerImport() {
+        const inp = document.getElementById('importFileInput');
+        if(inp) inp.click();
+    }
+
+    function handleImportFile(evt) {
+        try{
+            const file = evt.target.files && evt.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try{
+                    const data = JSON.parse(String(reader.result || '{}'));
+                    if(!data || typeof data !== 'object') throw new Error('格式不正确');
+
+                    // 恢复前先自动做一次备份，便于回滚
+                    try{ rotateBackups(true); }catch(e){}
+
+                    state = data;
+                    normalizeState();
+                    doSaveNow();
+                    renderAll();
+                    alert('导入成功：已覆盖当前数据。');
+                }catch(e){
+                    alert('导入失败：' + (e.message || '文件不是有效的 JSON 备份'));
+                }finally{
+                    evt.target.value = '';
+                }
+            };
+            reader.readAsText(file, 'utf-8');
+        }catch(e){
+            alert('导入失败：读取文件出错');
+        }
+    }
+
+    function readBackupSlot(i){
+        try{
+            const snap = localStorage.getItem(BACKUP_KEYS[i]);
+            const metaRaw = localStorage.getItem(BACKUP_META[i]);
+            const meta = metaRaw ? JSON.parse(metaRaw) : null;
+            return { snap, meta };
+        }catch(e){ return { snap:null, meta:null }; }
+    }
+
+    function restoreBackupSlot(i){
+        const slot = readBackupSlot(i);
+        if(!slot.snap) { alert('该备份槽为空'); return; }
+        if(!confirm('确定用该备份恢复？这会覆盖当前数据。建议先导出一份 JSON。')) return;
+        try{
+            // 恢复前再做一次备份，便于回滚
+            rotateBackups(true);
+
+            state = JSON.parse(slot.snap);
+            normalizeState();
+            doSaveNow();
+            renderAll();
+            alert('已恢复备份。');
+        }catch(e){
+            alert('恢复失败：备份内容损坏或不兼容');
+        }
+    }
+
+    function clearBackupSlot(i){
+        if(!confirm('确定清空该备份槽？')) return;
+        try{
+            localStorage.removeItem(BACKUP_KEYS[i]);
+            localStorage.removeItem(BACKUP_META[i]);
+            renderBackupList();
+        }catch(e){}
+    }
+
+    function rotateBackupNow(){
+        try{ rotateBackups(true); renderBackupList(); alert('已生成备份快照'); }catch(e){ alert('备份失败'); }
+    }
+
+    function fmtBackupMeta(meta){
+        try{
+            if(!meta) return '未知时间';
+            const d = meta.date ? new Date(meta.date) : (meta.ts ? new Date(meta.ts) : null);
+            if(!d) return '未知时间';
+            return d.toLocaleString();
+        }catch(e){ return '未知时间'; }
+    }
+
+    function renderBackupList(){
+        const wrap = document.getElementById('backupList');
+        if(!wrap) return;
+        const rows = [0,1,2].map(i => {
+            const { snap, meta } = readBackupSlot(i);
+            const label = '备份 ' + (i+1);
+            const time = snap ? fmtBackupMeta(meta) : '（空）';
+            const size = snap ? (Math.round((snap.length/1024)*10)/10 + ' KB') : '-';
+            return `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 16px; border:1px solid #E2E8F0; border-radius:16px; background:#fff;">
+                    <div>
+                        <div style="font-weight:900;">${label}</div>
+                        <div style="font-size:12px; color:var(--text-sub); margin-top:6px;">时间：${time} ｜ 体积：${size}</div>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-ghost" onclick="restoreBackupSlot(${i})" ${snap ? '' : 'disabled'}>恢复</button>
+                        <button class="btn-ghost" onclick="clearBackupSlot(${i})" ${snap ? '' : 'disabled'}>清空</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        wrap.innerHTML = rows;
+    }
+
+function exportData() {
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
         const a = document.createElement('a'); a.href = dataStr; a.download = "glowup_v18_backup.json"; a.click();
     }
 
-    window.onload = () => { 
+    
+
+    // --- 数据安全：导入备份 / 恢复自动备份 ---
+    function flushSaveNow() {
+        try{
+            if(typeof doSaveNow === 'function') {
+                if(_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+                if(_savePending) _savePending = false;
+                doSaveNow();
+            } else {
+                // fallback
+                Object.keys(state).forEach(key => {
+                    const storageKey = 'gp17_' + (key === 'studyProjects' ? 'study_p' : key === 'resources' ? 'res' : key);
+                    localStorage.setItem(storageKey, JSON.stringify(state[key]));
+                });
+            }
+        }catch(e){}
+    }
+
+    function importData() {
+        const input = document.getElementById('backupFileInput');
+        if(!input) { alert('未找到导入控件'); return; }
+        input.value = '';
+        input.onchange = (e) => {
+            const file = e.target.files && e.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const obj = JSON.parse(String(reader.result || '{}'));
+                    if(!obj || typeof obj !== 'object') throw new Error('invalid');
+                    state = obj;
+                    if(typeof normalizeState === 'function') normalizeState();
+                    flushSaveNow();
+                    // 全量刷新
+                    try{ processCycles(); }catch(e){}
+                    try{ checkLegacyTasks(); }catch(e){}
+                    try{ renderCalendarStrip(); }catch(e){}
+                    try{ renderTodos(); }catch(e){}
+                    try{ renderRetros(); }catch(e){}
+                    try{ renderStudyView(); }catch(e){}
+                    try{ renderResources(); }catch(e){}
+                    try{ renderWater(); }catch(e){}
+                    try{ renderHeatMap(); }catch(e){}
+                    try{ renderMedalWall(); }catch(e){}
+                    try{ checkTodayCompletion(); }catch(e){}
+                    alert('✅ 导入成功：已恢复数据。');
+                } catch(err) {
+                    alert('❌ 导入失败：备份文件格式不正确。');
+                }
+            };
+            reader.readAsText(file, 'utf-8');
+        };
+        input.click();
+    }
+
+    function restoreLatestBackup() {
+        try {
+            const raw = localStorage.getItem('gp17_backup_1');
+            if(!raw) { alert('暂无可用的自动备份。'); return; }
+            if(!confirm('确定恢复最近一次自动备份？将覆盖当前数据。')) return;
+            const obj = JSON.parse(raw);
+            if(!obj || typeof obj !== 'object') throw new Error('invalid');
+            state = obj;
+            if(typeof normalizeState === 'function') normalizeState();
+            flushSaveNow();
+            // 全量刷新
+            try{ processCycles(); }catch(e){}
+            try{ checkLegacyTasks(); }catch(e){}
+            try{ renderCalendarStrip(); }catch(e){}
+            try{ renderTodos(); }catch(e){}
+            try{ renderRetros(); }catch(e){}
+            try{ renderStudyView(); }catch(e){}
+            try{ renderResources(); }catch(e){}
+            try{ renderWater(); }catch(e){}
+            try{ renderHeatMap(); }catch(e){}
+            try{ renderMedalWall(); }catch(e){}
+            try{ checkTodayCompletion(); }catch(e){}
+            alert('✅ 已恢复最近自动备份。');
+        } catch(e) {
+            alert('❌ 恢复失败：自动备份不可用。');
+        }
+    }
+
+window.onload = () => { 
         processCycles(); 
         checkLegacyTasks();
         renderCalendarStrip(); 
@@ -1098,8 +1463,10 @@ ${retros.slice(0,4).map(r => '- ' + r.title).join('\n') || '- （本周暂无复
         renderWater(); 
         renderHeatMap(); 
         renderMedalWall();
+        renderBackupList();
         checkTodayCompletion();
     };
 </script>
+<input id="backupFileInput" type="file" accept="application/json" style="display:none" />
 </body>
 </html>
