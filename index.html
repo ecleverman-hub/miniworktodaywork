@@ -142,6 +142,87 @@
         /* --- 庆祝动效（轻量）--- */
         @keyframes popIn { from{ transform: scale(0.92); opacity: 0;} to{ transform: scale(1); opacity: 1;} }
 
+        /* --- 弹窗（周报预览）--- */
+        .modal-overlay{
+            position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+            backdrop-filter: blur(12px);
+            display:none; align-items:center; justify-content:center;
+            z-index: 1200;
+        }
+        .modal{
+            width: min(720px, 92vw);
+            background: white;
+            border-radius: 26px;
+            box-shadow: 0 25px 70px rgba(0,0,0,0.22);
+            border: 1px solid rgba(255,255,255,0.7);
+            overflow: hidden;
+            animation: popIn .22s ease;
+        }
+        .modal-head{
+            padding: 18px 22px;
+            display:flex; justify-content:space-between; align-items:center;
+            border-bottom: 1px solid #EEF2FF;
+            background: linear-gradient(135deg, rgba(124,131,253,0.10), rgba(150,186,255,0.10));
+        }
+        .modal-head h3{ margin:0; font-size: 16px; letter-spacing: .2px; }
+        .modal-body{ padding: 18px 22px 22px 22px; }
+        .modal-actions{ display:flex; gap:10px; justify-content:flex-end; padding: 0 22px 22px 22px; }
+        .btn-danger{ background: rgba(255,107,107,0.12); color: var(--danger); border:1px solid rgba(255,107,107,0.25); padding:10px 16px; border-radius: 12px; cursor:pointer; font-weight:700; }
+        .btn-danger:hover{ transform: translateY(-1px); }
+        .report-textarea{
+            width: 100%;
+            height: 330px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 13px;
+            line-height: 1.55;
+            border-radius: 16px;
+            padding: 14px 16px;
+            border: 1px solid #E2E8F0;
+            background: #FBFCFF;
+            resize: vertical;
+        }
+
+        /* --- 奖章墙 --- */
+        .medal-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:18px; }
+        .medal-badge{
+            background: rgba(255,255,255,0.92);
+            border: 1px solid rgba(255,255,255,0.7);
+            border-radius: 22px;
+            box-shadow: var(--shadow);
+            padding: 18px 18px 16px 18px;
+            transition: .25s;
+            position: relative;
+            overflow: hidden;
+        }
+        .medal-badge:hover{ transform: translateY(-2px); box-shadow: 0 18px 55px rgba(124,131,253,0.16); }
+        .medal-ico{
+            width: 54px; height: 54px; border-radius: 18px;
+            display:flex; align-items:center; justify-content:center;
+            font-size: 28px;
+            background: linear-gradient(135deg, rgba(124,131,253,0.16), rgba(110,203,99,0.14));
+            border: 1px solid rgba(124,131,253,0.18);
+        }
+        .medal-row{ display:flex; gap:14px; align-items:flex-start; }
+        .medal-title{ margin: 0; font-size: 15px; font-weight: 900; }
+        .medal-desc{ margin: 6px 0 0 0; font-size: 12px; color: var(--text-sub); line-height: 1.5; }
+        .medal-date{
+            margin-top: 10px;
+            display:inline-flex;
+            font-size: 11px;
+            font-weight: 800;
+            color: rgba(45,50,80,0.65);
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: rgba(124,131,253,0.10);
+            border: 1px solid rgba(124,131,253,0.16);
+        }
+        .medal-spark{
+            position:absolute; inset:auto -30px -30px auto;
+            width: 140px; height: 140px;
+            background: radial-gradient(circle at 30% 30%, rgba(255,173,96,0.28), rgba(124,131,253,0.0) 60%);
+            transform: rotate(12deg);
+        }
+
     </style>
 </head>
 <body>
@@ -154,6 +235,28 @@
             <button class="btn-primary" style="width:100%">收下这份荣誉</button>
         </div>
     </div>
+
+
+    <!-- 周报预览弹窗 -->
+    <div id="reportOverlay" class="modal-overlay" onclick="closeReportModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-head">
+                <h3>📝 本周周报预览（可编辑）</h3>
+                <button class="btn-ghost" style="padding:8px 12px;" onclick="closeReportModal()">关闭</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="reportTextarea" class="report-textarea" placeholder="这里会生成你的周报..."></textarea>
+                <div style="margin-top:10px; font-size:12px; color:var(--text-sub);">
+                    小贴士：你可以直接在这里改写语气、补充亮点，然后一键复制。
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-ghost" onclick="downloadReportTxt()">下载 .txt</button>
+                <button class="btn-primary" onclick="copyReport()">一键复制</button>
+            </div>
+        </div>
+    </div>
+
 
     <nav class="sidebar">
         <div class="logo">GlowUp<span>Pro</span></div>
@@ -168,6 +271,7 @@
             <div class="nav-item" onclick="switchView('study', this)">📚 长期学习</div>
             <div class="nav-item" onclick="switchView('resource', this)">🔗 资源导航</div>
             <div class="nav-item" onclick="switchView('stats', this)">📈 成长热力</div>
+            <div class="nav-item" onclick="switchView('medals', this)">🏅 奖章墙</div>
         </div>
         <div class="widget-area" style="margin-top: auto; display: flex; flex-direction: column; gap: 15px;">
             <div class="water-card">
@@ -257,6 +361,28 @@
             <h1>成长热力图</h1>
             <div class="glass-card"><div class="heat-map" id="heatMap"></div></div>
         </section>
+
+
+        <section id="view-medals" class="view-section">
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:20px;">
+                <div>
+                    <h1 style="margin:0;">奖章墙</h1>
+                    <div style="font-size:12px; color:var(--text-sub); margin-top:8px;">
+                        这里收集你每一次「把事做成」的小证据。越攒越自信。
+                    </div>
+                </div>
+                <button class="btn-ghost" onclick="clearMedalWall()" title="不会影响你的任务/复盘/学习数据">清空奖章</button>
+            </div>
+
+            <div class="glass-card" style="padding:18px; display:flex; gap:14px; flex-wrap:wrap; align-items:center;">
+                <div style="font-weight:900;">📊 本月概览</div>
+                <div style="font-size:12px; color:var(--text-sub);" id="medalSummary">-</div>
+            </div>
+
+            <div id="medalGrid" class="medal-grid"></div>
+            <p id="medalEmpty" style="text-align:center; color:#A0AEC0; padding:40px; display:none;">还没有奖章，先去完成一个小目标吧 ✨</p>
+        </section>
+
     </main>
 
 <script>
@@ -271,7 +397,8 @@
         resources: JSON.parse(localStorage.getItem('gp17_res')) || [],
         water: JSON.parse(localStorage.getItem('gp17_water')) || {},
         studyProjects: JSON.parse(localStorage.getItem('gp17_study_p')) || [],
-        medals: JSON.parse(localStorage.getItem('gp17_medals')) || []
+        medals: JSON.parse(localStorage.getItem('gp17_medals')) || [],
+        medalWall: JSON.parse(localStorage.getItem('gp17_medalWall')) || []
     };
 
     function save() {
@@ -291,9 +418,73 @@
         if(!overlay || !t || !d) return;
         t.textContent = title || '达成里程碑！';
         d.textContent = desc || '';
+        // 写入奖章墙（避免重复：用 title+date 作为 key）
+        try{ upsertMedal((title||'').trim() + '|' + getToday(), '🏆', title, desc, getToday()); }catch(e){}
         overlay.style.display = 'flex';
         const card = overlay.querySelector('.medal-card');
         if(card) { card.style.animation = 'popIn 0.25s ease'; }
+    }
+
+
+    // --- 奖章墙：写入与展示（新增，不影响既有功能）---
+    function upsertMedal(key, icon, title, desc, dateStr) {
+        if(!key) return;
+        if(!state.medalWall) state.medalWall = [];
+        const exist = state.medalWall.find(m => m.key === key);
+        const payload = {
+            key,
+            icon: icon || '🏅',
+            title: title || '里程碑',
+            desc: desc || '',
+            date: dateStr || getToday()
+        };
+        if(exist) {
+            // 保留更早的达成日期，但允许更新描述/标题
+            exist.title = payload.title;
+            exist.desc = payload.desc;
+            exist.icon = payload.icon;
+        } else {
+            state.medalWall.unshift(payload);
+        }
+        save();
+    }
+
+    function renderMedalWall() {
+        const grid = document.getElementById('medalGrid');
+        const empty = document.getElementById('medalEmpty');
+        const summary = document.getElementById('medalSummary');
+        if(!grid || !empty || !summary) return;
+
+        const list = (state.medalWall || []);
+        empty.style.display = list.length ? 'none' : 'block';
+
+        // 本月统计
+        const now = new Date();
+        const ym = now.toISOString().slice(0,7);
+        const monthCount = list.filter(m => (m.date || '').slice(0,7) === ym).length;
+        const total = list.length;
+        summary.textContent = `本月新增 ${monthCount} 枚｜累计 ${total} 枚｜继续保持这股劲儿`;
+
+        grid.innerHTML = list.map(m => `
+            <div class="medal-badge">
+                <div class="medal-spark"></div>
+                <div class="medal-row">
+                    <div class="medal-ico">${m.icon || '🏅'}</div>
+                    <div style="min-width:0;">
+                        <p class="medal-title" title="${(m.title||'').replace(/"/g,'&quot;')}">${m.title || ''}</p>
+                        <p class="medal-desc">${(m.desc||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>
+                        <span class="medal-date">达成：${m.date || ''}</span>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function clearMedalWall() {
+        if(confirm('确定清空奖章墙？这不会影响你的任务/复盘/学习数据。')) {
+            state.medalWall = [];
+            save(); renderMedalWall();
+        }
     }
 
     // 防止重复庆祝：记录当天是否已经庆祝过“今日任务清零”
@@ -404,6 +595,8 @@
             state.todos[viewingDate].push({ id: Date.now(), text, done: false, subtasks: [] });
         } else {
             state.configs.push({ id: Date.now(), text, type, start: viewingDate, end: end });
+            // 立刻在当前查看日期生效（修复循环不生效的问题）
+            ensureCycledTasks(viewingDate);
             processCycles();
         }
         document.getElementById('todoInput').value = '';
@@ -411,6 +604,8 @@
     }
 
     function renderTodos() {
+        // 确保循环任务在当前查看日期被正确生成
+        ensureCycledTasks(viewingDate);
         const list = document.getElementById('todoList');
         const tasks = state.todos[viewingDate] || [];
         list.innerHTML = tasks.map((t) => `
@@ -568,6 +763,7 @@ function deleteTodo(id) { if(confirm('确认删除?')) { state.todos[viewingDate
     function switchView(id, el) {
         document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
         document.getElementById('view-' + id).classList.add('active');
+        if(id === 'medals') renderMedalWall();
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         el.classList.add('active');
     }
@@ -583,22 +779,47 @@ function deleteTodo(id) { if(confirm('确认删除?')) { state.todos[viewingDate
         }
     }
 
-    function processCycles() {
-        const today = getToday(); const dayOfWeek = new Date(today).getDay();
-        state.configs.forEach(conf => {
-            if (today >= conf.start && (!conf.end || today <= conf.end)) {
-                let match = (conf.type === 'daily') || (conf.type === 'workday' && dayOfWeek >= 1 && dayOfWeek <= 5) || (conf.type === 'weekly' && dayOfWeek === new Date(conf.start).getDay());
-                if (match) {
-                    if (!state.todos[today]) state.todos[today] = [];
-                    if (!state.todos[today].some(t => t.text === conf.text)) state.todos[today].push({ ...conf, id: Date.now()+Math.random(), done: false });
+
+    // --- 循环任务生成（修复：支持在任意日期视图生效）---
+    function ensureCycledTasks(dateStr) {
+        const target = dateStr || getToday();
+        const dow = new Date(target).getDay();
+        (state.configs || []).forEach(conf => {
+            if (target >= conf.start && (!conf.end || target <= conf.end)) {
+                const startDow = new Date(conf.start).getDay();
+                const match =
+                    (conf.type === 'daily') ||
+                    (conf.type === 'workday' && dow >= 1 && dow <= 5) ||
+                    (conf.type === 'weekly' && dow === startDow);
+
+                if(match) {
+                    if(!state.todos[target]) state.todos[target] = [];
+                    // 用 confId 防重，避免同一天重复塞入
+                    if(!state.todos[target].some(t => t.confId === conf.id)) {
+                        state.todos[target].push({
+                            id: Date.now() + Math.random(),
+                            confId: conf.id,
+                            text: conf.text,
+                            done: false,
+                            subtasks: []
+                        });
+                    }
                 }
             }
         });
     }
 
+    function processCycles() {
+        ensureCycledTasks(getToday());
+    }
+
     function addRetro() {
         const title = document.getElementById('retroTitle').value; const content = document.getElementById('retroContent').value;
-        if(title && content) { state.retros.unshift({ title, content, date: getToday(), id: Date.now() }); save(); renderRetros(); document.getElementById('retroTitle').value = ''; document.getElementById('retroContent').value = ''; }
+        if(title && content) { state.retros.unshift({ title, content, date: getToday(), id: Date.now() }); save(); renderRetros();
+            // 复盘奖章：当天首篇
+            const todayCount = state.retros.filter(r => r.date === getToday()).length;
+            if(todayCount === 1) showMedal('复盘打卡 🧠', '今天也在认真变强。');
+            document.getElementById('retroTitle').value = ''; document.getElementById('retroContent').value = ''; }
     }
 
     
@@ -626,6 +847,39 @@ function deleteTodo(id) { if(confirm('确认删除?')) { state.todos[viewingDate
     function renderWater() { const c = state.water[getToday()] || 0; document.getElementById('waterText').innerText = c; document.getElementById('waterWave').style.height = (c/8*100) + '%'; }
 
     
+
+    // --- 周报弹窗预览（新增：替代仅复制提示）---
+    function openReportModal(text) {
+        const overlay = document.getElementById('reportOverlay');
+        const ta = document.getElementById('reportTextarea');
+        if(!overlay || !ta) return;
+        ta.value = text || '';
+        overlay.style.display = 'flex';
+        setTimeout(()=>{ ta.focus(); ta.setSelectionRange(0,0); }, 50);
+    }
+    function closeReportModal(e) {
+        if(e && e.target && e.target.id !== 'reportOverlay') return;
+        const overlay = document.getElementById('reportOverlay');
+        if(overlay) overlay.style.display = 'none';
+    }
+    function copyReport() {
+        const ta = document.getElementById('reportTextarea');
+        if(!ta) return;
+        navigator.clipboard.writeText(ta.value || '').then(() => {
+            showMedal('周报已复制 ✅', '去工作群/邮件里一键粘贴吧～');
+        });
+    }
+    function downloadReportTxt() {
+        const ta = document.getElementById('reportTextarea');
+        const content = (ta && ta.value) ? ta.value : '';
+        const blob = new Blob([content], {type:'text/plain;charset=utf-8'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `周报_${getToday()}.txt`;
+        a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+    }
+
     function generateReport() {
         const last7Days = Array.from({length: 7}, (_, i) => {
             const d = new Date(); d.setDate(d.getDate() - i);
@@ -675,7 +929,10 @@ ${topList}
 ${retros.slice(0,4).map(r => '- ' + r.title).join('\n') || '- （本周暂无复盘）'}
 `;
 
-        navigator.clipboard.writeText(report).then(() => alert("周报已复制！"));
+        // 打开弹窗预览（可编辑/复制/下载）
+        openReportModal(report);
+        // 也顺手复制一份，避免用户忘记
+        navigator.clipboard.writeText(report).catch(()=>{});
     }
 
 
@@ -694,6 +951,7 @@ ${retros.slice(0,4).map(r => '- ' + r.title).join('\n') || '- （本周暂无复
         renderResources(); 
         renderWater(); 
         renderHeatMap(); 
+        renderMedalWall();
         checkTodayCompletion();
     };
 </script>
