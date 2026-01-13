@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GlowUp Pro | 职场全能看板 V19</title>
+    <title>GlowUp Pro | 职场全能看板 V18</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         :root {
@@ -258,6 +258,26 @@
     </div>
 
 
+    <!-- 删除任务弹窗（支持循环任务：删一次 / 删规则） -->
+    <div id="deleteTodoOverlay" class="modal-overlay" onclick="closeDeleteTodoModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-head">
+                <h3 id="deleteTodoTitle">🗑️ 删除任务</h3>
+                <button class="btn-ghost" style="padding:8px 12px;" onclick="closeDeleteTodoModal()">关闭</button>
+            </div>
+            <div class="modal-body">
+                <div id="deleteTodoDesc" style="font-size:13px; line-height:1.6; color:var(--text-sub);">
+                    确认删除该任务？
+                </div>
+                <div id="deleteTodoHint" style="margin-top:10px; font-size:12px; color:rgba(45,50,80,0.55); display:none;">
+                    提示：循环任务如果只删除今天，会在未来日期继续出现。
+                </div>
+            </div>
+            <div class="modal-actions" id="deleteTodoActions"></div>
+        </div>
+    </div>
+
+
     <nav class="sidebar">
         <div class="logo">GlowUp<span>Pro</span></div>
         <div class="nav-group">
@@ -398,7 +418,8 @@
         water: JSON.parse(localStorage.getItem('gp17_water')) || {},
         studyProjects: JSON.parse(localStorage.getItem('gp17_study_p')) || [],
         medals: JSON.parse(localStorage.getItem('gp17_medals')) || [],
-        medalWall: JSON.parse(localStorage.getItem('gp17_medalWall')) || []
+        medalWall: JSON.parse(localStorage.getItem('gp17_medalWall')) || [],
+        cycleSkips: JSON.parse(localStorage.getItem('gp17_cycleSkips')) || {}
     };
 
     function save() {
@@ -652,9 +673,130 @@
         }
     }
 
-function deleteTodo(id) { if(confirm('确认删除?')) { state.todos[viewingDate] = state.todos[viewingDate].filter(t => t.id != id); save(); renderTodos(); } }
 
-    // --- 资源导航逻辑 (新增删除) ---
+    // --- 删除任务：普通任务/循环任务（弹窗选择） ---
+    let _pendingDeleteTodoId = null;
+
+    function openDeleteTodoModal(todoId) {
+        _pendingDeleteTodoId = todoId;
+        const list = state.todos[viewingDate] || [];
+        const t = list.find(x => x.id == todoId);
+        if(!t) return;
+
+        const overlay = document.getElementById('deleteTodoOverlay');
+        const title = document.getElementById('deleteTodoTitle');
+        const desc  = document.getElementById('deleteTodoDesc');
+        const hint  = document.getElementById('deleteTodoHint');
+        const actions = document.getElementById('deleteTodoActions');
+
+        actions.innerHTML = '';
+
+        // 普通任务
+        if(!t.confId) {
+            title.textContent = '🗑️ 删除任务';
+            desc.innerHTML = `确认删除 <b style="color:var(--text-main);">${escapeHtml(t.text || '该任务')}</b> 吗？`;
+            hint.style.display = 'none';
+
+            actions.innerHTML = `
+                <button class="btn-ghost" onclick="closeDeleteTodoModal()">取消</button>
+                <button class="btn-danger" onclick="confirmDeleteTodoOnce()">确认删除</button>
+            `;
+            overlay.style.display = 'flex';
+            return;
+        }
+
+        // 循环任务
+        title.textContent = '🔁 删除循环任务';
+        desc.innerHTML = `这是一个循环任务：<b style="color:var(--text-main);">${escapeHtml(t.text || '')}</b><br>请选择删除方式：`;
+        hint.style.display = 'block';
+
+        actions.innerHTML = `
+            <button class="btn-ghost" onclick="closeDeleteTodoModal()">取消</button>
+            <button class="btn-ghost" onclick="confirmDeleteTodoOnlyToday()">仅删除今天</button>
+            <button class="btn-danger" onclick="confirmDeleteTodoRule()">删除整个循环</button>
+        `;
+        overlay.style.display = 'flex';
+    }
+
+    function closeDeleteTodoModal(ev) {
+        if(ev && ev.target && ev.target.id !== 'deleteTodoOverlay') return;
+        document.getElementById('deleteTodoOverlay').style.display = 'none';
+        _pendingDeleteTodoId = null;
+    }
+
+    // 普通任务：确认删除
+    function confirmDeleteTodoOnce() {
+        const id = _pendingDeleteTodoId;
+        if(!id) return;
+        const list = state.todos[viewingDate] || [];
+        state.todos[viewingDate] = list.filter(x => x.id != id);
+        closeDeleteTodoModal();
+        save(); renderTodos();
+    }
+
+    // 循环任务：仅删除今天（并写入 skip，避免自动生成回来）
+    function confirmDeleteTodoOnlyToday() {
+        const id = _pendingDeleteTodoId;
+        if(!id) return;
+
+        const list = state.todos[viewingDate] || [];
+        const t = list.find(x => x.id == id);
+        if(!t || !t.confId) return;
+
+        state.todos[viewingDate] = list.filter(x => x.id != id);
+
+        if(!state.cycleSkips) state.cycleSkips = {};
+        if(!state.cycleSkips[viewingDate]) state.cycleSkips[viewingDate] = [];
+        if(!state.cycleSkips[viewingDate].includes(t.confId)) state.cycleSkips[viewingDate].push(t.confId);
+
+        closeDeleteTodoModal();
+        save(); renderTodos();
+    }
+
+    // 循环任务：删除整个循环规则（清掉 configs + 已生成实例 + skip）
+    function confirmDeleteTodoRule() {
+        const id = _pendingDeleteTodoId;
+        if(!id) return;
+
+        const list = state.todos[viewingDate] || [];
+        const t = list.find(x => x.id == id);
+        if(!t || !t.confId) return;
+
+        const confId = t.confId;
+
+        // 移除规则
+        state.configs = (state.configs || []).filter(c => c.id !== confId);
+
+        // 清掉所有日期里已生成的该循环任务实例
+        Object.keys(state.todos || {}).forEach(dateKey => {
+            state.todos[dateKey] = (state.todos[dateKey] || []).filter(task => task.confId !== confId);
+        });
+
+        // 清掉跳过记录（避免脏数据）
+        Object.keys(state.cycleSkips || {}).forEach(dateKey => {
+            state.cycleSkips[dateKey] = (state.cycleSkips[dateKey] || []).filter(x => x !== confId);
+            if(state.cycleSkips[dateKey].length === 0) delete state.cycleSkips[dateKey];
+        });
+
+        closeDeleteTodoModal();
+        save(); renderTodos();
+    }
+
+    // 兼容你原来的调用：renderTodos 里仍然是 deleteTodo(id)
+    function deleteTodo(id) {
+        openDeleteTodoModal(id);
+    }
+
+    // 简单转义（用于弹窗展示）
+    function escapeHtml(str) {
+        return String(str)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }
+// --- 资源导航逻辑 (新增删除) ---
     function addResource() {
         const name = document.getElementById('resName').value;
         const url = document.getElementById('resUrl').value;
@@ -793,6 +935,10 @@ function deleteTodo(id) { if(confirm('确认删除?')) { state.todos[viewingDate
                     (conf.type === 'weekly' && dow === startDow);
 
                 if(match) {
+                    // ✅ 如果用户选择“仅删除今天这一次”，就不要再生成
+                    const skipped = (state.cycleSkips && state.cycleSkips[target] && state.cycleSkips[target].includes(conf.id));
+                    if(skipped) return;
+
                     if(!state.todos[target]) state.todos[target] = [];
                     // 用 confId 防重，避免同一天重复塞入
                     if(!state.todos[target].some(t => t.confId === conf.id)) {
