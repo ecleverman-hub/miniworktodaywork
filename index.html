@@ -281,7 +281,34 @@
     </div>
 
 
-    <nav class="sidebar">
+    
+    <!-- 批量添加任务弹窗 -->
+    <div id="batchTodoOverlay" class="modal-overlay" onclick="closeBatchTodoModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-head">
+                <h3>🧾 批量添加任务</h3>
+                <button class="btn-ghost" style="padding:8px 12px;" onclick="closeBatchTodoModal()">关闭</button>
+            </div>
+            <div class="modal-body">
+                <div style="font-size:12px; color:var(--text-sub); line-height:1.6; margin-bottom:10px;">
+                    每行一条任务。将使用当前选择的「循环」和「截止日期」设置应用到所有新增任务。<br>
+                    小技巧：<b>Ctrl/⌘ + Enter</b> 立即添加。
+                </div>
+                <textarea id="batchTodoTextarea" class="report-textarea" style="height:220px;" placeholder="例如：&#10;写周报&#10;整理会议纪要&#10;健身 30 分钟"></textarea>
+                <div style="margin-top:10px; display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--text-sub);">
+                    <span>当前循环：<b id="batchTodoRepeatPreview">-</b></span>
+                    <span>当前截止：<b id="batchTodoEndPreview">-</b></span>
+                    <span>添加到日期：<b id="batchTodoDatePreview">-</b></span>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-ghost" onclick="closeBatchTodoModal()">取消</button>
+                <button class="btn-primary" onclick="confirmBatchAddTodos()">添加任务</button>
+            </div>
+        </div>
+    </div>
+
+<nav class="sidebar">
         <div class="logo">GlowUp<span>Pro</span></div>
         <div class="nav-group">
             <div class="nav-label">每日工作</div>
@@ -334,6 +361,7 @@
                 <div style="display:flex; gap:12px; margin-bottom:15px;">
                     <input type="text" id="todoInput" placeholder="想完成什么任务？(回车添加)" onkeypress="if(event.key==='Enter') addTodo()">
                     <button class="btn-primary" onclick="addTodo()" style="white-space:nowrap;">添加任务</button>
+                    <button class="btn-ghost" onclick="openBatchTodoModal()" style="white-space:nowrap;">🧾 批量</button>
                 </div>
                 <div style="display:flex; flex-wrap:wrap; gap:20px; font-size:13px; color:var(--text-sub);">
                     <span>🔁 循环: <select id="repeatType" style="width:110px; padding:6px; margin-left:5px;"><option value="none">不循环</option><option value="daily">每天</option><option value="workday">工作日</option><option value="weekly">每周</option></select></span>
@@ -792,8 +820,12 @@
                     <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTodo(\'${t.id}\')" style="width:20px; height:20px; accent-color:var(--primary);">
                     <div style="flex:1; font-weight:700; font-size:16px; ${t.done ? 'text-decoration:line-through;' : ''}">${t.text}</div>
                     <button class="btn-ghost" onclick="addSubtask(\'${t.id}\')">+ 拆解</button>
+                    <button class="btn-ghost" onclick="toggleTodoQuickAdd(\'${t.id}\')">🧾 批量</button>
                     <div style="color:var(--danger); cursor:pointer; font-size:18px;" onclick="deleteTodo(\'${t.id}\')">×</div>
                 </div>
+
+                ${_todoQuick && _todoQuick[t.id] ? renderTodoQuickAddPanel(t.id) : ""}
+
                 ${t.subtasks && t.subtasks.length > 0 ? `<div class="subtask-container">${t.subtasks.map(s => `<div class="subtask-item"><div class="subtask-actions" style="flex:1;"><input type="checkbox" ${s.done ? 'checked' : ''} onchange="toggleSubtask(\'${t.id}\', \'${s.id}\')" style="width:18px; height:18px; accent-color:var(--primary);"><span style="flex:1; font-size:14px; ${s.done ? 'text-decoration:line-through; color:#A0AEC0;' : ''}" title="${s.text}">${s.text}</span></div><span class="icon-del" title="删除子任务" onclick="deleteSubtask(\'${t.id}\', \'${s.id}\')">×</span></div>`).join('')}</div>` : ''}
             </div>`).join('') || '<p style="text-align:center; color:#A0AEC0; padding:40px;">今日无安排</p>';
     }
@@ -813,6 +845,79 @@
             save(); renderTodos();
         }
     }
+
+// --- Todo 子任务：内嵌批量添加（新增：不替换原 addSubtask，纯增强）---
+// 仅用于 UI 展开状态（不写入 localStorage，不影响你原有数据结构）
+window._todoQuick = window._todoQuick || {};
+const _todoQuick = window._todoQuick;
+
+function _safeDomId(str){
+    return String(str).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function toggleTodoQuickAdd(tid){
+    _todoQuick[tid] = !_todoQuick[tid];
+    renderTodos();
+    if(_todoQuick[tid]){
+        setTimeout(()=>{
+            const ta = document.getElementById('todoQuickAdd_' + _safeDomId(tid));
+            if(ta){
+                ta.focus();
+                ta.selectionStart = ta.value.length;
+                ta.selectionEnd = ta.value.length;
+            }
+        }, 30);
+    }
+}
+
+function renderTodoQuickAddPanel(tid){
+    const domId = _safeDomId(tid);
+    return `
+        <div style="margin-top:12px; padding:12px; border:1px dashed rgba(124,131,253,0.25); border-radius:16px; background:rgba(124,131,253,0.04);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+                <div style="font-size:12px; color:var(--text-sub); font-weight:800;">🧾 批量添加子任务（每行一条，Ctrl/⌘ + Enter 快速保存）</div>
+                <button class="btn-ghost" style="padding:6px 10px;" onclick="toggleTodoQuickAdd('${tid}')">收起</button>
+            </div>
+            <textarea id="todoQuickAdd_${domId}" placeholder="例如：\n查资料\n写方案\n实现代码\n测试"
+                style="height:90px; resize:vertical;"
+                onkeydown="if((event.ctrlKey||event.metaKey) && event.key==='Enter'){ submitTodoQuickAdd('${tid}'); }"></textarea>
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:10px;">
+                <button class="btn-ghost" onclick="clearTodoQuickAdd('${tid}')">清空</button>
+                <button class="btn-primary" onclick="submitTodoQuickAdd('${tid}')">添加到子任务</button>
+            </div>
+        </div>
+    `;
+}
+
+function clearTodoQuickAdd(tid){
+    const ta = document.getElementById('todoQuickAdd_' + _safeDomId(tid));
+    if(ta) ta.value = '';
+}
+
+function submitTodoQuickAdd(tid){
+    const list = state.todos[viewingDate] || [];
+    const t = list.find(x => x.id == tid);
+    if(!t) return;
+
+    const ta = document.getElementById('todoQuickAdd_' + _safeDomId(tid));
+    const raw = (ta && ta.value) ? ta.value : '';
+    const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if(!lines.length) return;
+
+    if(!Array.isArray(t.subtasks)) t.subtasks = [];
+
+    lines.forEach(text => {
+        // 弱去重：同一任务内已有同名子任务则跳过
+        if(t.subtasks.some(s => (s.text||'').trim() === text)) return;
+        t.subtasks.push({ id: uid('sub'), text, done: false });
+    });
+
+    save(); renderTodos();
+
+    // 保持面板打开，便于继续追加；添加后清空输入
+    if(ta) ta.value = '';
+}
+
 
     function toggleSubtask(tid, sid) {
         const t = state.todos[viewingDate].find(x => x.id == tid);
@@ -953,6 +1058,71 @@
             .replaceAll('"', '&quot;')
             .replaceAll("'", '&#39;');
     }
+
+    // --- 批量添加任务（只新增，不影响原 addTodo 逻辑） ---
+    function openBatchTodoModal() {
+        const overlay = document.getElementById('batchTodoOverlay');
+        const ta = document.getElementById('batchTodoTextarea');
+        if(!overlay || !ta) return;
+
+        // 预览当前设置
+        const type = document.getElementById('repeatType')?.value || 'none';
+        const end  = document.getElementById('repeatEndDate')?.value || '';
+        const typeText = (type === 'none') ? '不循环' : (type === 'daily') ? '每天' : (type === 'workday') ? '工作日' : '每周';
+        document.getElementById('batchTodoRepeatPreview').textContent = typeText;
+        document.getElementById('batchTodoEndPreview').textContent = end || '（未设置）';
+        document.getElementById('batchTodoDatePreview').textContent = viewingDate;
+
+        overlay.style.display = 'flex';
+        ta.value = '';
+        setTimeout(()=>ta.focus(), 30);
+
+        // Ctrl/⌘ + Enter 快捷添加
+        ta.onkeydown = (e) => {
+            if((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                confirmBatchAddTodos();
+            }
+        };
+    }
+
+    function closeBatchTodoModal(ev) {
+        if(ev && ev.target && ev.target.id !== 'batchTodoOverlay') return;
+        const overlay = document.getElementById('batchTodoOverlay');
+        const ta = document.getElementById('batchTodoTextarea');
+        if(ta) ta.onkeydown = null;
+        if(overlay) overlay.style.display = 'none';
+    }
+
+    function confirmBatchAddTodos() {
+        const ta = document.getElementById('batchTodoTextarea');
+        if(!ta) return;
+        const raw = ta.value || '';
+        const lines = raw.split(/\r?\n/).map(s => (s || '').trim()).filter(Boolean);
+        if(lines.length === 0) { closeBatchTodoModal(); return; }
+
+        const type = document.getElementById('repeatType')?.value || 'none';
+        const end  = document.getElementById('repeatEndDate')?.value || '';
+
+        if(type === 'none') {
+            if(!state.todos[viewingDate]) state.todos[viewingDate] = [];
+            lines.forEach(text => {
+                state.todos[viewingDate].push({ id: uid('todo'), text, done: false, subtasks: [] });
+            });
+        } else {
+            // 每行一条循环规则（与原 addTodo 一致）
+            lines.forEach(text => {
+                state.configs.push({ id: uid('conf'), text, type, start: viewingDate, end: end });
+            });
+            // 立刻在当前查看日期生效
+            ensureCycledTasks(viewingDate);
+            processCycles();
+        }
+
+        closeBatchTodoModal();
+        save(); renderTodos();
+    }
+
 // --- 资源导航逻辑 (新增删除) ---
     function addResource() {
         const name = document.getElementById('resName').value;
@@ -1031,11 +1201,14 @@
                     </div>
                     <div style="display:flex; gap:10px; flex-shrink:0;">
                         <button class="btn-ghost" onclick="addStudySub(${p.id})">+ 细项</button>
+                        <button class="btn-ghost" onclick="toggleStudyQuickAdd(${p.id})">🧾 批量</button>
                         <button class="btn-ghost" style="color:var(--danger)" onclick="deleteStudy(${p.id})">放弃</button>
                     </div>
                 </div>
 
                 <div class="progress-bar"><div class="progress-inner" style="width:${progress}%"></div></div>
+
+                ${_studyQuick && _studyQuick[p.id] ? renderStudyQuickAddPanel(p.id) : ""}
 
                 ${total ? `<div style="margin-top:10px;">${subHtml}</div>` : `<p style="color:#A0AEC0; font-size:13px; margin:12px 0 0 0;">还没有细项，先点「+ 细项」拆解一下吧</p>`}
             </div>`;
@@ -1050,6 +1223,76 @@
         save(); renderStudyView();
         checkStudyMilestone(pid);
         }
+
+    // --- 长期学习：批量/快捷添加细项（新增：不替换原 addStudySub，纯增强）---
+    // 仅用于 UI 展开状态（不写入 localStorage，不影响你原有数据结构）
+    window._studyQuick = window._studyQuick || {};
+
+    function toggleStudyQuickAdd(pid){
+        window._studyQuick[pid] = !window._studyQuick[pid];
+        renderStudyView();
+        // 展开后自动聚焦
+        if(window._studyQuick[pid]){
+            setTimeout(()=>{
+                const ta = document.getElementById('studyQuickAdd_' + pid);
+                if(ta){ 
+                    ta.focus(); 
+                    ta.selectionStart = ta.value.length; 
+                    ta.selectionEnd = ta.value.length; 
+                }
+            }, 30);
+        }
+    }
+
+    function renderStudyQuickAddPanel(pid){
+        return `
+            <div style="margin-top:12px; padding:12px; border:1px dashed rgba(124,131,253,0.25); border-radius:16px; background:rgba(124,131,253,0.04);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+                    <div style="font-size:12px; color:var(--text-sub); font-weight:800;">🧾 批量添加细项（每行一条，Ctrl/⌘ + Enter 快速保存）</div>
+                    <button class="btn-ghost" style="padding:6px 10px;" onclick="toggleStudyQuickAdd(${pid})">收起</button>
+                </div>
+                <textarea id="studyQuickAdd_${pid}" placeholder="例如：\n1) 看完第1章\n2) 写5道题\n3) 复盘笔记"
+                    style="height:90px; resize:vertical;"
+                    onkeydown="if((event.ctrlKey||event.metaKey) && event.key==='Enter'){ submitStudyQuickAdd(${pid}); }"></textarea>
+                <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:10px;">
+                    <button class="btn-ghost" onclick="clearStudyQuickAdd(${pid})">清空</button>
+                    <button class="btn-primary" onclick="submitStudyQuickAdd(${pid})">添加到细项</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function clearStudyQuickAdd(pid){
+        const ta = document.getElementById('studyQuickAdd_' + pid);
+        if(ta) ta.value = '';
+    }
+
+    function submitStudyQuickAdd(pid){
+        const p = state.studyProjects.find(x=>x.id===pid);
+        if(!p) return;
+        const ta = document.getElementById('studyQuickAdd_' + pid);
+        const raw = (ta && ta.value) ? ta.value : '';
+        const lines = raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        if(!lines.length) return;
+
+        // 兼容你原来的 subtask 结构：{id, text, done}
+        if(!Array.isArray(p.subtasks)) p.subtasks = [];
+
+        const now = Date.now();
+        lines.forEach((t, idx)=>{
+            // 弱去重：同项目内已有同名细项就不再加
+            if(p.subtasks.some(s => (s.text||'').trim() === t)) return;
+            p.subtasks.push({ id: now + idx + Math.floor(Math.random()*1000), text: t, done: false });
+        });
+
+        save();
+        renderStudyView();
+
+        // 保持面板打开方便继续追加；添加后清空输入
+        if(ta) ta.value = '';
+    }
+
+
 
     function addStudySub(pid) {
         const txt = prompt("细项内容:");
